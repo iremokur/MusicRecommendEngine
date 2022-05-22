@@ -1,11 +1,6 @@
-from winsound import PlaySound
 from flask import Flask, render_template, request,url_for,flash,redirect
 import pandas as pd
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.preprocessing import MinMaxScaler
-import matplotlib.pyplot as plt
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import spotipy.util as util
@@ -18,15 +13,15 @@ API_BASE = 'https://accounts.spotify.com'
 
 
 # Pull songs from a user's playlist.
-def create_necessary_outputs(playlist_name, df,sp):
+def createPlaylistOutputs(playlistName, df,sp):
     
     #generate playlist dataframe
     playlist = pd.DataFrame()
-    playlist_name = playlist_name.split('?')[0]
+    playlistName = playlistName.split('?')[0]
 
-    playlist_name = playlist_name.split('/')[4]
+    playlistName = playlistName.split('/')[4]
 
-    for ix, i in enumerate(sp.playlist(playlist_name)['tracks']['items']):
+    for ix, i in enumerate(sp.playlist(playlistName)['tracks']['items']):
 
         playlist.loc[ix, 'artist'] = i['track']['artists'][0]['name']
         playlist.loc[ix, 'name'] = i['track']['name']
@@ -41,52 +36,54 @@ def create_necessary_outputs(playlist_name, df,sp):
     return playlist
 
 
-# Summarize a user's playlist into a single vector
-def generate_playlist_feature(complete_feature_set, playlist_df, weight_factor):
+# Summarize the user's playlist into a single vector
+# weightFactor: 1.09
+def generatePlaylistFeature(completeFeatureSet, playlist_df, weightFactor):
 
-       
-    complete_feature_set_playlist = complete_feature_set[complete_feature_set['id'].isin(playlist_df['id'].values)]#.drop('id', axis = 1).mean(axis =0)
-    complete_feature_set_playlist = complete_feature_set_playlist.merge(playlist_df[['id','date_added']], on = 'id', how = 'inner')
-    complete_feature_set_nonplaylist = complete_feature_set[~complete_feature_set['id'].isin(playlist_df['id'].values)]#.drop('id', axis = 1)
+    completeFeatureSetPlaylist = completeFeatureSet[completeFeatureSet['id'].isin(playlist_df['id'].values)]#.drop('id', axis = 1).mean(axis =0)
+    completeFeatureSetPlaylist = completeFeatureSetPlaylist.merge(playlist_df[['id','date_added']], on = 'id', how = 'inner')
+    completeFeatureSetNonplaylist = completeFeatureSet[~completeFeatureSet['id'].isin(playlist_df['id'].values)]#.drop('id', axis = 1)
     
-    playlist_feature_set = complete_feature_set_playlist.sort_values('date_added',ascending=False)
-
-    most_recent_date = playlist_feature_set.iloc[0,-1]
+    playlistFeatureSet = completeFeatureSetPlaylist.sort_values('date_added',ascending=False)
+    most_recent_date = playlistFeatureSet.iloc[0,-1]
     
-    for ix, row in playlist_feature_set.iterrows():
-        playlist_feature_set.loc[ix,'months_from_recent'] = int((most_recent_date.to_pydatetime() - row.iloc[-1].to_pydatetime()).days / 30)
+    for ix, row in playlistFeatureSet.iterrows():
+        playlistFeatureSet.loc[ix,'months_from_recent'] = int((most_recent_date.to_pydatetime() - row.iloc[-1].to_pydatetime()).days / 30)
         
-    playlist_feature_set['weight'] = playlist_feature_set['months_from_recent'].apply(lambda x: weight_factor ** (-x))
+    playlistFeatureSet['weight'] = playlistFeatureSet['months_from_recent'].apply(lambda x: weightFactor ** (-x))
+    ##weighted playlist
+    playlistFeatureSet_weighted = playlistFeatureSet.copy()
+    playlistFeatureSet_weighted.update(playlistFeatureSet_weighted.iloc[:,:-4].mul(playlistFeatureSet_weighted.weight,0))
+    playlistFeatureSet_weighted_last = playlistFeatureSet_weighted.iloc[:, :-4]
     
-    playlist_feature_set_weighted = playlist_feature_set.copy()
-    playlist_feature_set_weighted.update(playlist_feature_set_weighted.iloc[:,:-4].mul(playlist_feature_set_weighted.weight,0))
-    playlist_feature_set_weighted_final = playlist_feature_set_weighted.iloc[:, :-4]
-    # playlist_feature_set_weighted_final single feature that summarizes the playlist
-    # complete_feature_set_nonplaylist
-    return playlist_feature_set_weighted_final.sum(axis = 0), complete_feature_set_nonplaylist
+    # playlistFeatureSet_weighted_last single feature that summarizes the playlist
+    # completeFeatureSetNonplaylist
+    return playlistFeatureSet_weighted_last.sum(axis = 0), completeFeatureSetNonplaylist
 
 
 
 #Pull songs from a specific playlist.
-def generate_playlist_recos(df, features, nonplaylist_features, sp):
+def generatePlaylistCosineSim(df, features, nonplaylist_features, sp):
    
-    non_playlist_df = df[df['id'].isin(nonplaylist_features['id'].values)]
-    non_playlist_df['sim'] = cosine_similarity(nonplaylist_features.drop('id', axis = 1).values, features.values.reshape(1, -1))[:,0]
-    non_playlist_df_top_10 = non_playlist_df.sort_values('sim',ascending = False).head(10)
-    non_playlist_df_top_10['url'] = non_playlist_df_top_10['id'].apply(lambda x: sp.track(x)['album']['images'][1]['url'])
-    
+    nonplaylistDf = df[df['id'].isin(nonplaylist_features['id'].values)]
+    ##cosine similarity is used
+    nonplaylistDf['sim'] = cosine_similarity(nonplaylist_features.drop('id', axis = 1).values, features.values.reshape(1, -1))[:,0]
+    # take the 10 nearest songs
+    nonplaylistDf_top10 = nonplaylistDf.sort_values('sim',ascending = False).head(10)
+    nonplaylistDf_top10['url'] = nonplaylistDf_top10['id'].apply(lambda x: sp.track(x)['album']['images'][1]['url'])
+    # convert to an dictionary to help the passing the data.
+    response = nonplaylistDf_top10.to_dict('records')
 
-    response = non_playlist_df_top_10.to_dict('records')
-    
     # Top 5 recommendations for that playlist as a dict.
     return response
 
 
-def spotify(link,spotify_df,sp):
+def spotify(link,spotifyDf,sp):
  
-    playlist = create_necessary_outputs(link,spotify_df,sp)
+    playlist = createPlaylistOutputs(link,spotifyDf,sp)
     return playlist
 
+#first 
 @app.route("/",methods=['GET', 'POST'])
 def render():
     if request.method == 'POST':
@@ -104,7 +101,7 @@ def home():
 def submit():
     #take playlist url
     link= request.form.get("inputName")
-    spotify_df=pd.read_csv("spotify_last.csv")
+    spotifyDf=pd.read_csv("spotify_last.csv")
     ####AUTHENTICATION####
     #client id and secret FROM SPOTIFY DEVELOPERS
     client_id = '941e4cf6c2294d018f5dde685dbc5e0c'
@@ -115,14 +112,16 @@ def submit():
     token = util.prompt_for_user_token(scope, client_id= client_id, client_secret=client_secret, redirect_uri='"http://127.0.0.1:5000/submit')
     sp = spotipy.Spotify(auth=token)
     
-    playlist=spotify(link,spotify_df,sp)
-    complete_feature_set=pd.read_csv("final.csv")
+    #take the user's playlist and make it meaningful
+    playlist=spotify(link,spotifyDf,sp)
+    # comes from spotify_csv.py
+    completeFeatureSet=pd.read_csv("final.csv")
 
-    complete_feature_set_playlist_vector_EDM, complete_feature_set_nonplaylist_EDM = generate_playlist_feature(complete_feature_set, playlist, 1.09)
-    # #complete_feature_set_playlist_vector_chill, complete_feature_set_nonplaylist_chill = generate_playlist_feature(complete_feature_set, playlist_chill, 1.09)
-    top5 = generate_playlist_recos(spotify_df, complete_feature_set_playlist_vector_EDM, complete_feature_set_nonplaylist_EDM, sp)
+    #completeFeatureSetNonplaylist: not in the user's playlist
+    completeFeatureSetPlaylistVector, completeFeatureSetNonplaylist = generatePlaylistFeature(completeFeatureSet, playlist, 1.09)
+    top10 = generatePlaylistCosineSim(spotifyDf, completeFeatureSetPlaylistVector, completeFeatureSetNonplaylist, sp)
 
-    return render_template("songs.html", top5=top5) 
+    return render_template("songs.html", top10=top10) 
 
 
 if __name__ == "__main__":

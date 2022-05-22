@@ -33,7 +33,7 @@
     <div class="title"><h2>Here is your recommended songs!</h2></div>
     <div class="wrapper">
       <div class="circle circle1"></div>
-      {% for value in top5 %}
+      {% for value in top10 %}
       <div class="box {{value.id}}">
         <img src="{{ value.url }}" width="200" height="200" />
         <p>{{ value.artists[2:value.artists|length-2] }}</p>
