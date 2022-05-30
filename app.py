@@ -104,8 +104,8 @@ def submit():
     spotifyDf=pd.read_csv("spotify_last.csv")
     ####AUTHENTICATION####
     #client id and secret FROM SPOTIFY DEVELOPERS
-    client_id = '941e4cf6c2294d018f5dde685dbc5e0c'
-    client_secret= '6f2b6dbaffdb4ba8ae4ea06b8d40c45d'
+    client_id = ''
+    client_secret= ''
     auth_manager = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
     sp = spotipy.Spotify(auth_manager=auth_manager)
 
